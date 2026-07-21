@@ -1,0 +1,208 @@
+pip install striprtf
+
+
+from pathlib import Path
+import csv
+import re
+
+from striprtf.striprtf import rtf_to_text
+
+
+INPUT_FILES = [
+    Path("Files(340).RTF"),
+    Path("Files(500) (3).RTF"),
+]
+
+OUTPUT_FILE = Path("combined_articles.csv")
+EXPECTED_ROWS = 840
+
+
+DATE_PATTERN = re.compile(
+    r"^(January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4}\b"
+)
+
+BODY_PATTERN = re.compile(r"^Body(?:_\d+)?(?:Body)?$")
+URL_PATTERN = re.compile(r"https?://\S+")
+PICTURE_PATTERN = re.compile(r"pict\d+\.jpg", re.IGNORECASE)
+
+
+def clean_line(line):
+    line = PICTURE_PATTERN.sub("", line)
+    line = line.replace("\xa0", " ")
+    return re.sub(r"\s+", " ", line).strip()
+
+
+def parse_lexis_file(path):
+    raw_rtf = path.read_text(
+        encoding="utf-8",
+        errors="ignore"
+    )
+
+    plain_text = rtf_to_text(raw_rtf)
+
+    lines = [
+        clean_line(line)
+        for line in plain_text.splitlines()
+    ]
+
+    records = []
+
+    for body_index, line in enumerate(lines):
+
+        if not BODY_PATTERN.fullmatch(line):
+            continue
+
+        # Find the publication date above the Body label
+        date_index = None
+
+        for i in range(
+            body_index - 1,
+            max(-1, body_index - 35),
+            -1
+        ):
+            if DATE_PATTERN.match(lines[i]):
+                date_index = i
+                break
+
+        if date_index is None:
+            continue
+
+        date_match = DATE_PATTERN.match(
+            lines[date_index]
+        )
+
+        if date_match is None:
+            continue
+
+        date_of_publication = date_match.group(0)
+
+        # Find outlet and title above the date
+        header_candidates = []
+
+        for i in range(
+            date_index - 1,
+            max(-1, date_index - 25),
+            -1
+        ):
+            value = lines[i]
+
+            if not value:
+                continue
+
+            if URL_PATTERN.fullmatch(value):
+                continue
+
+            if value.startswith("http"):
+                continue
+
+            if value in {
+                "WebNews - Academic",
+                "WebNews - English",
+                "WebNews - Spanish"
+            }:
+                continue
+
+            if value.startswith("Page of"):
+                continue
+
+            if value.startswith("Bookmark_"):
+                continue
+
+            header_candidates.append(value)
+
+            if len(header_candidates) == 2:
+                break
+
+        if len(header_candidates) < 2:
+            continue
+
+        media_outlet = header_candidates[0]
+        title = header_candidates[1]
+
+        # Extract everything after Body and before Classification
+        body_lines = []
+
+        i = body_index + 1
+
+        while i < len(lines):
+
+            value = lines[i]
+
+            if value.startswith("Classification"):
+                break
+
+            if value.startswith("End of Document"):
+                break
+
+            if value and not value.startswith("###"):
+                body_lines.append(value)
+
+            i += 1
+
+        body = " ".join(body_lines)
+        body = re.sub(r"\s+", " ", body).strip()
+
+        records.append(
+            {
+                "date_of_publication": date_of_publication,
+                "media_outlet": media_outlet,
+                "title": title,
+                "body": body
+            }
+        )
+
+    return records
+
+
+all_records = []
+
+
+for input_file in INPUT_FILES:
+
+    if not input_file.exists():
+        raise FileNotFoundError(
+            f"Could not find {input_file}"
+        )
+
+    records = parse_lexis_file(input_file)
+
+    print(
+        f"{input_file.name}: "
+        f"{len(records)} articles"
+    )
+
+    all_records.extend(records)
+
+
+with OUTPUT_FILE.open(
+    "w",
+    newline="",
+    encoding="utf-8-sig"
+) as csv_file:
+
+    writer = csv.DictWriter(
+        csv_file,
+        fieldnames=[
+            "date_of_publication",
+            "media_outlet",
+            "title",
+            "body"
+        ]
+    )
+
+    writer.writeheader()
+    writer.writerows(all_records)
+
+
+print(
+    f"Created {OUTPUT_FILE} "
+    f"with {len(all_records)} rows."
+)
+
+
+if len(all_records) != EXPECTED_ROWS:
+    print(
+        f"WARNING: Expected {EXPECTED_ROWS} rows, "
+        f"but extracted {len(all_records)}."
+    )
