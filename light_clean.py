@@ -26,6 +26,7 @@ raw_data.shape
 def remove_copyright(c_in):
     markers = [
         "Copyright Targeted News Services",
+        "*** Original text here:",
         "* * * Original text here:",
         "TM & ©",
         "Copyright ©",
