@@ -30,7 +30,8 @@ def remove_copyright(c_in):
         "* * * Original text here:",
         "TM & ©",
         "Copyright ©",
-        "All rights reserved"      
+        "All rights reserved",
+        "For more information on" 
     ]
     tmp = c_in
     for m in markers:
@@ -60,6 +61,10 @@ def tok_count(c_in, s_in):
 
 raw_data["tokens"] = raw_data["body_clean"].apply(lambda x: x.split())
 raw_data["tok_count"] = raw_data["body_clean"].apply(lambda x: tok_count(x,"total"))
+
+# Removing preview articles
+raw_data = raw_data[raw_data["tok_count"]>60]
+raw_data = raw_data.reset_index(drop=True)
 
 # Saving
 
